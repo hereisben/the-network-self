@@ -50,9 +50,9 @@ function drawUser(x, y, emoji, alpha = 1, identity = {}) {
 
     // Measure text size
     const textWidth = ctx.measureText(text).width;
-    const boxWidth = textWidth + 16;
+    const boxWidth = textWidth + 24;
     const boxHeight = 26;
-    const boxX = x + 55 - boxWidth / 2;
+    const boxX = x + 35 - boxWidth / 2;
     const boxY = y - 70;
 
     // Draw black rounded rectangle background
@@ -62,7 +62,7 @@ function drawUser(x, y, emoji, alpha = 1, identity = {}) {
 
     // Draw mood text
     ctx.fillStyle = "white";
-    ctx.fillText(text, x + 55, boxY + 18);
+    ctx.fillText(text, x + 35, boxY + 18);
   }
 
   // Draw the emoji
@@ -122,12 +122,20 @@ socket.on("cursor update", (data) => {
 
 socket.on("connect", () => {
   document.addEventListener("mousemove", (e) => {
-    activeTime += 100;
+    activeTime += 1;
     localStorage.setItem("activeTime", activeTime);
     const stage = getGrowthStage(activeTime);
+    const x = Math.max(
+      0,
+      Math.min(e.clientX, canvas.width / window.devicePixelRatio - 100)
+    );
+    const y = Math.max(
+      130,
+      Math.min(e.clientY, canvas.height / window.devicePixelRatio - 70)
+    );
     const data = {
-      x: e.clientX,
-      y: e.clientY,
+      x,
+      y,
       growth: stage.emoji,
       activeTime,
       lastSeen: Date.now(),
@@ -137,10 +145,9 @@ socket.on("connect", () => {
     };
     // Update growth progress bar
     const percent = Math.min(activeTime / 42000, 1);
-    document.getElementById("growthLabel").textContent = `${Math.min(
-      activeTime,
-      42000
-    )} / 42000`;
+    document.getElementById("growthLabel").textContent = `${(
+      percent * 100
+    ).toFixed(1)}% / 100.0%`;
     document.getElementById(
       "growthStage"
     ).textContent = `Stage: ${stage.emoji} ${stage.name}`;
