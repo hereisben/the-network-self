@@ -1,0 +1,172 @@
+body,
+html {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+}
+
+canvas {
+  border: 2px solid #ede8dc;
+  box-sizing: border-box;
+  position: absolute;
+  background-color: #945034;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+}
+
+#whisperInput {
+  background-color: #ffddab;
+  outline: none;
+  border-radius: 5px;
+  border: 2px solid white;
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  font-size: 16px;
+  padding: 6px 10px;
+  z-index: 2;
+}
+
+.whisper {
+  position: absolute;
+  font-size: 16px;
+  font-family: "Courier New", Courier, monospace;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 4px 10px;
+  border-radius: 8px;
+  animation: fadeInOut 5s ease-in-out forwards;
+  z-index: 1;
+}
+
+#avatarLabel {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  display: flex;
+  height: 24px;
+  gap: 8px;
+  align-items: center;
+  font-size: 18px;
+  color: white;
+  z-index: 10;
+}
+
+#avatarLabel > * {
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 8px 14px;
+  border-radius: 8px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+#avatarLabel #growthStage {
+  width: 220px;
+  overflow: hidden;
+  position: relative;
+}
+
+#avatarLabel #growthBarContainer {
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+  width: 420px;
+  font-weight: 700;
+}
+
+#avatarLabel #growthBarContainer .bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 0%;
+}
+
+#avatarLabel #growthBarContainer #bar1 {
+  background-color: #4e342e;
+  left: 0%;
+}
+
+#avatarLabel #growthBarContainer #bar2 {
+  background-color: #5d4037;
+  left: 10%;
+}
+
+#avatarLabel #growthBarContainer #bar3 {
+  background-color: #6d4c41;
+  left: 20%;
+}
+
+#avatarLabel #growthBarContainer #bar4 {
+  background-color: #795548;
+  left: 30%;
+}
+#avatarLabel #growthBarContainer #bar5 {
+  background-color: #827717;
+  left: 40%;
+}
+#avatarLabel #growthBarContainer #bar6 {
+  background-color: #a7cf5d;
+
+  left: 50%;
+}
+#avatarLabel #growthBarContainer #bar7 {
+  background-color: #76a21e;
+  left: 60%;
+}
+#avatarLabel #growthBarContainer #bar8 {
+  background-color: #428b46;
+  left: 70%;
+}
+#avatarLabel #growthBarContainer #bar9 {
+  background-color: #2e7d32;
+  left: 80%;
+}
+#avatarLabel #growthBarContainer #bar10 {
+  background-color: #1b5e20;
+  left: 90%;
+}
+
+#avatarLabel #growthBarContainer #growthLabel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 18px;
+  color: white;
+}
+
+#plantCount {
+  font-size: 18px;
+  height: 24px;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 8px 14px;
+  border-radius: 8px;
+  z-index: 10;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
