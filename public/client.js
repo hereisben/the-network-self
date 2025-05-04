@@ -1,6 +1,14 @@
 const socket = io();
 const users = {};
 let activeTime = 0;
+let isLocked = false;
+
+let userId = localStorage.getItem("userId");
+if (!userId) {
+  userId = crypto.randomUUID();
+  localStorage.setItem("userId", userId);
+}
+
 let mood =
   localStorage.getItem("mood") || prompt("What's your vibe right now?");
 if (!localStorage.getItem("mood")) {
@@ -11,7 +19,23 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
 window.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("avatarText").textContent = `You’re growing a plant!`;
+  document.getElementById("avatarText").textContent = "Key: [Ctrl] | [Esc]";
+  const storedTime = Number(localStorage.getItem("activeTime")) || 0;
+  activeTime = storedTime;
+  updateProgressBar(activeTime);
+  const x = Number(localStorage.getItem("lastX")) || 100;
+  const y = Number(localStorage.getItem("lastY")) || 200;
+  const stage = getGrowthStage(activeTime);
+
+  users[userId] = {
+    id: userId,
+    x,
+    y,
+    growth: stage.emoji,
+    activeTime,
+    lastSeen: Date.now(),
+    identity: { mood },
+  };
 });
 
 function resizeCanvas() {
@@ -39,129 +63,107 @@ function getGrowthStage(t) {
   return { emoji: "🌰", name: "Seed" };
 }
 
+function updateProgressBar(activeTime) {
+  const stage = getGrowthStage(activeTime);
+  const percent = Math.min(activeTime / 42000, 1);
+
+  document.getElementById("growthLabel").textContent = `${(
+    percent * 100
+  ).toFixed(1)}% / 100.0%`;
+  document.getElementById(
+    "growthStage"
+  ).textContent = `Stage: ${stage.emoji} ${stage.name}`;
+
+  for (let i = 0; i < 10; i++) {
+    const segment = document.getElementById(`bar${i + 1}`);
+    segment.style.width = `${
+      Math.max(Math.min(percent - i * 0.1, 0.1), 0) * 100
+    }%`;
+  }
+}
+
 function drawUser(x, y, emoji, alpha = 1, identity = {}) {
   ctx.globalAlpha = alpha;
-
-  // Draw mood/status box above the emoji
   if (identity.mood) {
     const text = identity.mood;
     ctx.font = "18px sans-serif";
     ctx.textAlign = "center";
-
-    // Measure text size
     const textWidth = ctx.measureText(text).width;
     const boxWidth = textWidth + 24;
     const boxHeight = 26;
     const boxX = x + 35 - boxWidth / 2;
     const boxY = y - 70;
-
-    // Draw black rounded rectangle background
     ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
     drawRoundedRect(ctx, boxX, boxY, boxWidth, boxHeight, 6);
     ctx.fill();
-
-    // Draw mood text
     ctx.fillStyle = "white";
     ctx.fillText(text, x + 35, boxY + 18);
   }
-
-  // Draw the emoji
   ctx.font = "50px sans-serif";
   ctx.fillStyle = "white";
   ctx.textAlign = "start";
   ctx.fillText(emoji, x, y);
-
   ctx.globalAlpha = 1;
 }
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const now = Date.now();
 
+  const margin = 30;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(
+    margin,
+    70,
+    canvas.width / window.devicePixelRatio - margin * 2,
+    canvas.height / window.devicePixelRatio - 140
+  );
+
+  const now = Date.now();
   for (const id in users) {
     const user = users[id];
-    const secondsSinceSeen = (now - user.lastSeen) / 1000;
-    const alpha =
-      secondsSinceSeen < 15
-        ? 1
-        : Math.max(0.3, 1 - (secondsSinceSeen - 15) / 60);
+    const alpha = now - user.lastSeen < 5000 ? 1 : 0.3;
     drawUser(user.x, user.y, user.growth, alpha, user.identity);
   }
   requestAnimationFrame(draw);
 }
 draw();
 
-socket.on("existing users", (existing) => {
-  for (const id in existing) {
-    users[id] = existing[id];
+setInterval(() => {
+  const now = Date.now();
+  for (const id in users) {
+    const user = users[id];
+    const inactiveDuration = now - user.lastSeen;
+    if (inactiveDuration < 5000 || user.activeTime <= 0) continue;
+    user.activeTime -= 25;
+    if (user.activeTime < 0) user.activeTime = 0;
+    const stage = getGrowthStage(user.activeTime);
+    user.growth = stage.emoji;
   }
-});
-
-socket.emit("request session");
-
-socket.on("restore session", (data) => {
-  if (data && data.activeTime) {
-    activeTime = data.activeTime;
-  } else {
-    const storedTime = Number(localStorage.getItem("activeTime")) || 0;
-    activeTime = storedTime;
-  }
-
-  if (data && data.mood) {
-    mood = data.mood;
-  }
-});
-
-socket.on("cursor update", (data) => {
-  users[data.id] = {
-    ...data,
-    lastSeen: Date.now(),
-    identity: data.identity || {},
-  };
-});
+}, 100);
 
 socket.on("connect", () => {
-  document.addEventListener("mousemove", (e) => {
-    activeTime += 1;
+  socket.emit("request session", { userId });
+
+  setInterval(() => {
+    activeTime += 1000;
     localStorage.setItem("activeTime", activeTime);
     const stage = getGrowthStage(activeTime);
-    const x = Math.max(
-      0,
-      Math.min(e.clientX, canvas.width / window.devicePixelRatio - 100)
-    );
-    const y = Math.max(
-      130,
-      Math.min(e.clientY, canvas.height / window.devicePixelRatio - 70)
-    );
+    updateProgressBar(activeTime);
+    const x = Number(localStorage.getItem("lastX")) || 100;
+    const y = Number(localStorage.getItem("lastY")) || 200;
     const data = {
+      id: userId,
       x,
       y,
       growth: stage.emoji,
       activeTime,
       lastSeen: Date.now(),
-      identity: {
-        mood,
-      },
+      identity: { mood },
     };
-    // Update growth progress bar
-    const percent = Math.min(activeTime / 42000, 1);
-    document.getElementById("growthLabel").textContent = `${(
-      percent * 100
-    ).toFixed(1)}% / 100.0%`;
-    document.getElementById(
-      "growthStage"
-    ).textContent = `Stage: ${stage.emoji} ${stage.name}`;
-
-    // Update each segment width
-    for (let i = 0; i < 10; i++) {
-      const segment = document.getElementById(`bar${i + 1}`);
-      segment.style.width = `${
-        Math.max(Math.min(percent - i * 0.1, 0.1), 0) * 100
-      }%`;
-    }
     socket.emit("cursor update", data);
-    users[socket.id] = data;
-  });
+    users[userId] = data;
+  }, 100);
 });
 
 const input = document.getElementById("whisperInput");
@@ -184,11 +186,40 @@ function showWhisper(text) {
   setTimeout(() => div.remove(), 10 * 60 * 1000);
 }
 
-socket.on("plant count", (count) => {
-  const countBox = document.getElementById("plantCount");
-  if (countBox) {
-    countBox.textContent = `🌻 Plants we’ve grown together: ${count}`;
+socket.on("restore session", (data) => {
+  activeTime =
+    data?.activeTime || Number(localStorage.getItem("activeTime")) || 0;
+  mood = data?.mood || mood;
+  updateProgressBar(activeTime);
+  users[userId] = {
+    id: userId,
+    x: Number(localStorage.getItem("lastX")) || 100,
+    y: Number(localStorage.getItem("lastY")) || 200,
+    growth: getGrowthStage(activeTime).emoji,
+    activeTime,
+    lastSeen: Date.now(),
+    identity: { mood },
+  };
+});
+
+socket.on("existing users", (existing) => {
+  for (const id in existing) {
+    users[id] = existing[id];
   }
+});
+
+socket.on("cursor update", (data) => {
+  users[data.id] = {
+    ...data,
+    lastSeen: Date.now(),
+    identity: data.identity || {},
+  };
+});
+
+socket.on("plant count", (count) => {
+  document.getElementById(
+    "plantCount"
+  ).textContent = `🌻 Plants we’ve grown together: ${count}`;
 });
 
 function drawRoundedRect(ctx, x, y, width, height, radius) {
@@ -204,3 +235,65 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();
 }
+
+let lastMoodChange = 0;
+const MOOD_COOLDOWN = 30000; // 30 seconds
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Control") {
+    const now = Date.now();
+    if (now - lastMoodChange < MOOD_COOLDOWN) {
+      alert("Please wait before changing your mood again.");
+      return;
+    }
+
+    const newMood = prompt("Change your mood:");
+    if (newMood && newMood.trim() !== "") {
+      mood = newMood.trim();
+      localStorage.setItem("mood", mood);
+      lastMoodChange = now;
+
+      socket.emit("mood change", { mood, id: userId });
+
+      // Optional: also update local display immediately
+      if (users[userId]) {
+        users[userId].identity.mood = mood;
+      }
+    }
+  }
+});
+
+document.addEventListener("mousemove", (e) => {
+  if (isLocked) return;
+  const x = Math.max(
+    30,
+    Math.min(e.clientX, canvas.width / window.devicePixelRatio - 100)
+  );
+  const y = Math.max(
+    130,
+    Math.min(e.clientY, canvas.height / window.devicePixelRatio - 70)
+  );
+  localStorage.setItem("lastX", x);
+  localStorage.setItem("lastY", y);
+
+  const stage = getGrowthStage(activeTime);
+
+  const data = {
+    id: userId,
+    x,
+    y,
+    growth: stage.emoji,
+    activeTime,
+    lastSeen: Date.now(),
+    identity: { mood },
+  };
+
+  socket.emit("cursor update", data);
+  users[userId] = data;
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    isLocked = !isLocked;
+  }
+});
