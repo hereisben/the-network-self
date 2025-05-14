@@ -1,31 +1,38 @@
-const { loadUsers, saveUsers } = require("./fileStore");
+// sockets.js — Mongoose + MongoDB Atlas version
 
-let allUsers = loadUsers();
+// Import the Mongoose model for User data
+const User = require("./models/User");
+
+// Maps userId to socket.id for tracking
 const userIdToSocketId = {};
-let fullBloomCount = Object.values(allUsers).filter(
-  (u) => u.growth === "🌻"
-).length;
-const fullBloomIDs = new Set(
-  Object.keys(allUsers).filter((id) => allUsers[id].growth === "🌻")
-);
 
+// Counter and tracker for how many users reached 🌻 Full Bloom
+let fullBloomCount = 0;
+const fullBloomIDs = new Set(); // Store unique user IDs who reached full bloom
+
+// Export a function that sets up all socket event listeners
 module.exports = function (io) {
+  // Triggered when a user connects to the server
   io.on("connection", (socket) => {
     console.log("🔌 User connected:", socket.id);
 
-    socket.on("check accountId", (accountId, callback) => {
-      const taken = Object.values(allUsers).some(
-        (u) => u.identity?.accountId === accountId
-      );
-      callback(!taken);
+    // Check if the accountId is already taken in the database
+    socket.on("check accountId", async (accountId, callback) => {
+      const existing = await User.findOne({ "identity.accountId": accountId });
+      callback(!existing); // Return true if accountId is available
     });
 
-    socket.on("request session", ({ userId, mood }) => {
+    // Handle session initialization request
+    socket.on("request session", async ({ userId, mood }) => {
+      // Link userId to socket.id
       userIdToSocketId[userId] = socket.id;
 
-      if (!allUsers[userId]) {
-        // New user
-        allUsers[userId] = {
+      // Check if this user already exists in the database
+      let user = await User.findOne({ id: userId });
+
+      // If not found, create a new one
+      if (!user) {
+        user = new User({
           id: userId,
           x: 100,
           y: 200,
@@ -33,108 +40,131 @@ module.exports = function (io) {
           activeTime: 0,
           lastSeen: Date.now(),
           identity: { mood: mood || "🌱", accountId: userId },
-        };
+        });
       } else if (mood) {
-        // Existing user, update mood if provided
-        allUsers[userId].identity.mood = mood;
+        // Update mood if provided
+        user.identity.mood = mood;
       }
 
-      saveUsers(allUsers);
+      await user.save();
 
-      const previous = allUsers[userId];
+      // Track full bloom status
+      if (user.growth === "🌻") fullBloomIDs.add(user.id);
+      fullBloomCount = fullBloomIDs.size;
+
+      // Send session data back to the client
       socket.emit("restore session", {
-        activeTime: previous.activeTime || 0,
-        mood: previous.identity?.mood || "",
+        activeTime: user.activeTime,
+        mood: user.identity.mood,
       });
 
+      // Send all current users to this client
+      const allUsers = await loadAllUsers();
       socket.emit("existing users", allUsers);
+
+      // Send current full bloom count
       socket.emit("plant count", fullBloomCount);
     });
 
-    socket.on("cursor update", (data) => {
+    // Handle live cursor/growth updates from clients
+    socket.on("cursor update", async (data) => {
       const id = data.id || socket.id;
+      data.lastSeen = Date.now();
 
-      if (!data.identity?.accountId) {
-        data.identity = { ...data.identity, accountId: id };
-      }
+      // Save or update user info in the database
+      const updated = await User.findOneAndUpdate(
+        { id },
+        { ...data, lastSeen: Date.now() },
+        { upsert: true, new: true }
+      );
 
-      allUsers[id] = { ...data, lastSeen: Date.now() };
-
-      if (data.growth === "🌻" && !fullBloomIDs.has(id)) {
+      // Update bloom count if this user just reached full bloom
+      if (updated.growth === "🌻" && !fullBloomIDs.has(id)) {
         fullBloomIDs.add(id);
         fullBloomCount++;
         io.emit("plant count", fullBloomCount);
       }
 
-      saveUsers(allUsers);
-      io.emit("cursor update", { id, ...data });
+      // Broadcast update to other clients
+      socket.broadcast.emit("cursor update", { id, ...data });
     });
 
-    socket.on("whisper", (message) => {
+    // Handle whisper messages between users
+    socket.on("whisper", async (message) => {
+      // Broadcast whisper to everyone
       io.emit("whisper", {
         id: socket.id,
         text: message,
       });
 
-      const senderAccountId = Object.values(allUsers).find(
-        (u) => userIdToSocketId[u.id] === socket.id
-      )?.identity?.accountId;
+      // Get sender's userId from socket
+      const sender = await User.findOne({ id: getUserIdBySocket(socket.id) });
+      if (!sender) return;
 
-      for (const id in allUsers) {
-        const user = allUsers[id];
-        if (!user) continue;
+      const senderAccountId = sender.identity?.accountId;
 
+      // Load all users from database
+      const all = await User.find();
+
+      // For each user, increase growth (more for sender)
+      for (const user of all) {
         const isSender = user.identity?.accountId === senderAccountId;
         user.activeTime += isSender ? 200 : 100;
         user.growth = getGrowthStage(user.activeTime).emoji;
         user.lastSeen = Date.now();
 
-        if (user.growth === "🌻" && !fullBloomIDs.has(id)) {
-          fullBloomIDs.add(id);
+        if (user.growth === "🌻" && !fullBloomIDs.has(user.id)) {
+          fullBloomIDs.add(user.id);
           fullBloomCount++;
           io.emit("plant count", fullBloomCount);
         }
 
-        io.emit("cursor update", {
-          id,
-          ...user,
-        });
-      }
+        await user.save();
 
-      saveUsers(allUsers);
-    });
-
-    socket.on("mood change", ({ mood, id }) => {
-      const socketId = userIdToSocketId[id];
-      const user = allUsers[socketId] || allUsers[id];
-      if (user) {
-        user.identity.mood = mood;
-        user.activeTime += 400;
-        user.lastSeen = Date.now();
-        user.growth = getGrowthStage(user.activeTime).emoji;
-
-        if (user.growth === "🌻" && !fullBloomIDs.has(id)) {
-          fullBloomIDs.add(id);
-          fullBloomCount++;
-          io.emit("plant count", fullBloomCount);
-        }
-
-        io.emit("cursor update", {
-          id,
-          ...user,
-        });
-
-        saveUsers(allUsers);
+        // Broadcast user update to all clients
+        io.emit("cursor update", user.toObject());
       }
     });
 
+    // Handle mood change requests
+    socket.on("mood change", async ({ mood, id }) => {
+      const user = await User.findOne({ id });
+      if (!user) return;
+
+      // Update mood and growth
+      user.identity.mood = mood;
+      user.activeTime += 400;
+      user.lastSeen = Date.now();
+      user.growth = getGrowthStage(user.activeTime).emoji;
+
+      // Update bloom count if needed
+      if (user.growth === "🌻" && !fullBloomIDs.has(id)) {
+        fullBloomIDs.add(id);
+        fullBloomCount++;
+        io.emit("plant count", fullBloomCount);
+      }
+
+      await user.save();
+
+      // Send update to everyone
+      io.emit("cursor update", user.toObject());
+    });
+
+    // Handle disconnection
     socket.on("disconnect", () => {
       console.log("❌ User disconnected:", socket.id);
-      saveUsers(allUsers);
     });
   });
 };
 
+// Helper to find a userId by socketId
+function getUserIdBySocket(socketId) {
+  return Object.entries(userIdToSocketId).find(
+    ([, sid]) => sid === socketId
+  )?.[0];
+}
+
+// Helper to determine growth stage by active time
 function getGrowthStage(t) {
   if (t > 42000) return { emoji: "🌻", name: "Full Bloom" };
   if (t > 37000) return { emoji: "🌼", name: "Peak Bloom" };
@@ -146,4 +176,12 @@ function getGrowthStage(t) {
   if (t > 5000) return { emoji: "🌿", name: "Seedling" };
   if (t > 2000) return { emoji: "🌱", name: "Germination" };
   return { emoji: "🌰", name: "Seed" };
+}
+
+// Load all users from the database and return as a dictionary
+async function loadAllUsers() {
+  const docs = await User.find();
+  const all = {};
+  for (const u of docs) all[u.id] = u.toObject();
+  return all;
 }
