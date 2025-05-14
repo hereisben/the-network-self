@@ -1,30 +1,32 @@
+// client.js (final fix with server-synced activeTime)
 const socket = io();
 const users = {};
 let activeTime = 0;
 let isLocked = false;
+let userId = null;
+let accountId = null;
+let mood = null;
 
-let userId = localStorage.getItem("userId");
-if (!userId) {
-  userId = crypto.randomUUID();
-  localStorage.setItem("userId", userId);
+async function promptForAccountId() {
+  while (!accountId) {
+    const input = prompt("Enter your account ID (or create one):");
+    if (!input) continue;
+    accountId = input.trim();
+    break;
+  }
 }
 
-let mood =
-  localStorage.getItem("mood") || prompt("What's your vibe right now?");
-if (!localStorage.getItem("mood")) {
-  localStorage.setItem("mood", mood);
-}
+async function initializeSession() {
+  await promptForAccountId();
+  mood = prompt("What's your vibe right now?") || "🌱";
 
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+  document.getElementById("avatarText").textContent =
+    "Key: [Ctrl] Change Mood | [Esc] Lock/Unlock Plant";
 
-window.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("avatarText").textContent = "Key: [Ctrl] | [Esc]";
-  const storedTime = Number(localStorage.getItem("activeTime")) || 0;
-  activeTime = storedTime;
-  updateProgressBar(activeTime);
-  const x = Number(localStorage.getItem("lastX")) || 100;
-  const y = Number(localStorage.getItem("lastY")) || 200;
+  userId = accountId;
+
+  const x = 100;
+  const y = 200;
   const stage = getGrowthStage(activeTime);
 
   users[userId] = {
@@ -34,9 +36,31 @@ window.addEventListener("DOMContentLoaded", () => {
     growth: stage.emoji,
     activeTime,
     lastSeen: Date.now(),
-    identity: { mood },
+    identity: { mood, accountId },
   };
-});
+
+  socket.emit("request session", { userId, mood });
+
+  setInterval(() => {
+    activeTime += 1;
+    const stage = getGrowthStage(activeTime);
+    updateProgressBar(activeTime);
+    const data = {
+      id: userId,
+      x: users[userId].x,
+      y: users[userId].y,
+      growth: stage.emoji,
+      activeTime,
+      lastSeen: Date.now(),
+      identity: { mood, accountId },
+    };
+    socket.emit("cursor update", data);
+    users[userId] = data;
+  }, 100);
+}
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -66,7 +90,6 @@ function getGrowthStage(t) {
 function updateProgressBar(activeTime) {
   const stage = getGrowthStage(activeTime);
   const percent = Math.min(activeTime / 42000, 1);
-
   document.getElementById("growthLabel").textContent = `${(
     percent * 100
   ).toFixed(1)}% / 100.0%`;
@@ -108,7 +131,6 @@ function drawUser(x, y, emoji, alpha = 1, identity = {}) {
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   const margin = 30;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
   ctx.lineWidth = 2;
@@ -129,51 +151,6 @@ function draw() {
 }
 draw();
 
-setInterval(() => {
-  const now = Date.now();
-  for (const id in users) {
-    const user = users[id];
-    const inactiveDuration = now - user.lastSeen;
-    if (inactiveDuration < 5000 || user.activeTime <= 0) continue;
-    user.activeTime -= 25;
-    if (user.activeTime < 0) user.activeTime = 0;
-    const stage = getGrowthStage(user.activeTime);
-    user.growth = stage.emoji;
-  }
-}, 100);
-
-socket.on("connect", () => {
-  socket.emit("request session", { userId });
-
-  setInterval(() => {
-    activeTime += 1000;
-    localStorage.setItem("activeTime", activeTime);
-    const stage = getGrowthStage(activeTime);
-    updateProgressBar(activeTime);
-    const x = Number(localStorage.getItem("lastX")) || 100;
-    const y = Number(localStorage.getItem("lastY")) || 200;
-    const data = {
-      id: userId,
-      x,
-      y,
-      growth: stage.emoji,
-      activeTime,
-      lastSeen: Date.now(),
-      identity: { mood },
-    };
-    socket.emit("cursor update", data);
-    users[userId] = data;
-  }, 100);
-});
-
-const input = document.getElementById("whisperInput");
-input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && input.value.trim() !== "") {
-    socket.emit("whisper", input.value.trim());
-    input.value = "";
-  }
-});
-
 socket.on("whisper", (msg) => showWhisper(msg.text));
 
 function showWhisper(text) {
@@ -187,18 +164,20 @@ function showWhisper(text) {
 }
 
 socket.on("restore session", (data) => {
-  activeTime =
-    data?.activeTime || Number(localStorage.getItem("activeTime")) || 0;
+  activeTime = data?.activeTime || 0;
   mood = data?.mood || mood;
   updateProgressBar(activeTime);
+
+  const x = 100;
+  const y = 200;
   users[userId] = {
     id: userId,
-    x: Number(localStorage.getItem("lastX")) || 100,
-    y: Number(localStorage.getItem("lastY")) || 200,
+    x,
+    y,
     growth: getGrowthStage(activeTime).emoji,
     activeTime,
     lastSeen: Date.now(),
-    identity: { mood },
+    identity: { mood, accountId },
   };
 });
 
@@ -214,6 +193,10 @@ socket.on("cursor update", (data) => {
     lastSeen: Date.now(),
     identity: data.identity || {},
   };
+
+  if (data.id === userId) {
+    activeTime = data.activeTime; // ✅ sync boost from server
+  }
 });
 
 socket.on("plant count", (count) => {
@@ -237,7 +220,7 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
 }
 
 let lastMoodChange = 0;
-const MOOD_COOLDOWN = 30000; // 30 seconds
+const MOOD_COOLDOWN = 30000;
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Control") {
@@ -250,12 +233,8 @@ document.addEventListener("keydown", (e) => {
     const newMood = prompt("Change your mood:");
     if (newMood && newMood.trim() !== "") {
       mood = newMood.trim();
-      localStorage.setItem("mood", mood);
       lastMoodChange = now;
-
       socket.emit("mood change", { mood, id: userId });
-
-      // Optional: also update local display immediately
       if (users[userId]) {
         users[userId].identity.mood = mood;
       }
@@ -264,7 +243,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 document.addEventListener("mousemove", (e) => {
-  if (isLocked) return;
+  if (isLocked || !userId) return;
   const x = Math.max(
     30,
     Math.min(e.clientX, canvas.width / window.devicePixelRatio - 100)
@@ -273,11 +252,11 @@ document.addEventListener("mousemove", (e) => {
     130,
     Math.min(e.clientY, canvas.height / window.devicePixelRatio - 70)
   );
-  localStorage.setItem("lastX", x);
-  localStorage.setItem("lastY", y);
+
+  users[userId].x = x;
+  users[userId].y = y;
 
   const stage = getGrowthStage(activeTime);
-
   const data = {
     id: userId,
     x,
@@ -285,7 +264,7 @@ document.addEventListener("mousemove", (e) => {
     growth: stage.emoji,
     activeTime,
     lastSeen: Date.now(),
-    identity: { mood },
+    identity: { mood, accountId },
   };
 
   socket.emit("cursor update", data);
@@ -297,3 +276,12 @@ document.addEventListener("keydown", (e) => {
     isLocked = !isLocked;
   }
 });
+
+document.getElementById("whisperInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.value.trim() !== "") {
+    socket.emit("whisper", e.target.value.trim());
+    e.target.value = "";
+  }
+});
+
+window.addEventListener("DOMContentLoaded", initializeSession);

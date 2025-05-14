@@ -1,58 +1,73 @@
-const allUsers = {}; // Tracks all users
-const userIdToSocketId = {}; // Maps persistent userId to socket.id
-let fullBloomCount = 0;
-const fullBloomIDs = new Set();
+const { loadUsers, saveUsers } = require("./fileStore");
+
+let allUsers = loadUsers();
+const userIdToSocketId = {};
+let fullBloomCount = Object.values(allUsers).filter(
+  (u) => u.growth === "🌻"
+).length;
+const fullBloomIDs = new Set(
+  Object.keys(allUsers).filter((id) => allUsers[id].growth === "🌻")
+);
 
 module.exports = function (io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected:", socket.id);
 
-    socket.on("request session", ({ userId }) => {
-      // Remove ghost session with same userId
-      if (userIdToSocketId[userId]) {
-        const oldSocketId = userIdToSocketId[userId];
-        delete allUsers[oldSocketId];
-        fullBloomIDs.delete(oldSocketId);
-      }
+    socket.on("check accountId", (accountId, callback) => {
+      const taken = Object.values(allUsers).some(
+        (u) => u.identity?.accountId === accountId
+      );
+      callback(!taken);
+    });
 
+    socket.on("request session", ({ userId, mood }) => {
       userIdToSocketId[userId] = socket.id;
 
-      const previous = Object.values(allUsers).find(
-        (u) => u.identity?.userId === userId
-      );
-
-      if (previous) {
-        socket.emit("restore session", {
-          activeTime: previous.activeTime || 0,
-          mood: previous.identity?.mood || "",
-        });
+      if (!allUsers[userId]) {
+        // New user
+        allUsers[userId] = {
+          id: userId,
+          x: 100,
+          y: 200,
+          growth: getGrowthStage(0).emoji,
+          activeTime: 0,
+          lastSeen: Date.now(),
+          identity: { mood: mood || "🌱", accountId: userId },
+        };
+      } else if (mood) {
+        // Existing user, update mood if provided
+        allUsers[userId].identity.mood = mood;
       }
 
-      // Send all known plants
-      socket.emit("existing users", allUsers);
+      saveUsers(allUsers);
 
-      // Sync bloom count
+      const previous = allUsers[userId];
+      socket.emit("restore session", {
+        activeTime: previous.activeTime || 0,
+        mood: previous.identity?.mood || "",
+      });
+
+      socket.emit("existing users", allUsers);
       socket.emit("plant count", fullBloomCount);
     });
 
     socket.on("cursor update", (data) => {
       const id = data.id || socket.id;
-      allUsers[id] = {
-        ...data,
-        lastSeen: Date.now(),
-      };
 
-      // Track full bloom
+      if (!data.identity?.accountId) {
+        data.identity = { ...data.identity, accountId: id };
+      }
+
+      allUsers[id] = { ...data, lastSeen: Date.now() };
+
       if (data.growth === "🌻" && !fullBloomIDs.has(id)) {
         fullBloomIDs.add(id);
         fullBloomCount++;
         io.emit("plant count", fullBloomCount);
       }
 
-      io.emit("cursor update", {
-        id,
-        ...data,
-      });
+      saveUsers(allUsers);
+      io.emit("cursor update", { id, ...data });
     });
 
     socket.on("whisper", (message) => {
@@ -61,16 +76,19 @@ module.exports = function (io) {
         text: message,
       });
 
-      // Growth boost: sender and all users
+      const senderAccountId = Object.values(allUsers).find(
+        (u) => userIdToSocketId[u.id] === socket.id
+      )?.identity?.accountId;
+
       for (const id in allUsers) {
         const user = allUsers[id];
-        user.activeTime =
-          (user.activeTime || 0) + (id === socket.id ? 200 : 100);
-        const newStage = getGrowthStage(user.activeTime);
-        user.growth = newStage.emoji;
+        if (!user) continue;
+
+        const isSender = user.identity?.accountId === senderAccountId;
+        user.activeTime += isSender ? 200 : 100;
+        user.growth = getGrowthStage(user.activeTime).emoji;
         user.lastSeen = Date.now();
 
-        // Full bloom sync
         if (user.growth === "🌻" && !fullBloomIDs.has(id)) {
           fullBloomIDs.add(id);
           fullBloomCount++;
@@ -82,10 +100,13 @@ module.exports = function (io) {
           ...user,
         });
       }
+
+      saveUsers(allUsers);
     });
 
     socket.on("mood change", ({ mood, id }) => {
-      const user = allUsers[id];
+      const socketId = userIdToSocketId[id];
+      const user = allUsers[socketId] || allUsers[id];
       if (user) {
         user.identity.mood = mood;
         user.activeTime += 400;
@@ -102,31 +123,18 @@ module.exports = function (io) {
           id,
           ...user,
         });
+
+        saveUsers(allUsers);
       }
     });
 
     socket.on("disconnect", () => {
       console.log("❌ User disconnected:", socket.id);
+      saveUsers(allUsers);
     });
   });
-
-  // Cleanup + subtract bloom if inactive
-  setInterval(() => {
-    const now = Date.now();
-    for (const id in allUsers) {
-      if (now - allUsers[id].lastSeen > 5000) {
-        if (allUsers[id].growth === "🌻" && fullBloomIDs.has(id)) {
-          fullBloomIDs.delete(id);
-          fullBloomCount--;
-          io.emit("plant count", fullBloomCount);
-        }
-        delete allUsers[id];
-      }
-    }
-  }, 100);
 };
 
-// Helper to compute stage
 function getGrowthStage(t) {
   if (t > 42000) return { emoji: "🌻", name: "Full Bloom" };
   if (t > 37000) return { emoji: "🌼", name: "Peak Bloom" };
