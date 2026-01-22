@@ -18,20 +18,23 @@ module.exports = function (io) {
 
     // Check if the accountId is already taken in the database
     socket.on("check accountId", async (accountId, callback) => {
-      const existing = await User.findOne({ "identity.accountId": accountId });
-      callback(!existing); // Return true if accountId is available
+      try {
+        const existing = await User.findOne({
+          "identity.accountId": accountId,
+        });
+        callback(!existing);
+      } catch (err) {
+        console.error("❌ check accountId error:", err);
+        callback(false);
+      }
     });
 
     // Handle session initialization request
     socket.on("request session", async ({ userId, mood, accountId }) => {
-      // Link userId to socket.id
-      userIdToSocketId[userId] = socket.id;
+      try {
+        userIdToSocketId[userId] = socket.id;
+        const now = Date.now();
 
-      // Check if this user already exists in the database
-      let user = await User.findOne({ id: userId });
-
-      // If not found, create a new one
-      if (!user) {
         const user = await User.findOneAndUpdate(
           { id: userId },
           {
@@ -41,80 +44,72 @@ module.exports = function (io) {
               y: 200,
               activeTime: 0,
               growth: getGrowthStage(0).emoji,
-              identity: { accountId: accountId || userId },
+              lastSeen: now,
+              "identity.accountId": accountId || userId,
+              "identity.mood": mood || "🌱",
             },
             $set: {
-              lastSeen: Date.now(),
-              ...(mood && { "identity.mood": mood }),
+              lastSeen: now,
+              ...(mood ? { "identity.mood": mood } : {}),
+              ...(accountId ? { "identity.accountId": accountId } : {}),
             },
           },
-          {
-            upsert: true,
-            new: true,
-          },
+          { upsert: true, new: true },
         );
-      } else if (mood) {
-        // Update mood if provided
-        user.identity.mood = mood;
+
+        // Track full bloom status
+        if (user.growth === "🌻") fullBloomIDs.add(user.id);
+        fullBloomCount = fullBloomIDs.size;
+
+        socket.emit("restore session", {
+          activeTime: user.activeTime,
+          mood: user.identity?.mood,
+        });
+
+        const allUsers = await loadAllUsers();
+        socket.emit("existing users", allUsers);
+        socket.emit("plant count", fullBloomCount);
+      } catch (err) {
+        console.error("❌ request session error:", err);
       }
-
-      await user.save();
-
-      // Track full bloom status
-      if (user.growth === "🌻") fullBloomIDs.add(user.id);
-      fullBloomCount = fullBloomIDs.size;
-
-      // Send session data back to the client
-      socket.emit("restore session", {
-        activeTime: user.activeTime,
-        mood: user.identity.mood,
-      });
-
-      // Send all current users to this client
-      const allUsers = await loadAllUsers();
-      socket.emit("existing users", allUsers);
-
-      // Send current full bloom count
-      socket.emit("plant count", fullBloomCount);
     });
 
     // Handle live cursor/growth updates from clients
     socket.on("cursor update", async (data) => {
-      const id = data.id || socket.id;
-      data.lastSeen = Date.now();
+      try {
+        const id = data.id || socket.id;
+        const now = Date.now();
 
-      const update = {
-        $set: {
-          x: data.x,
-          y: data.y,
-          growth: data.growth,
-          activeTime: data.activeTime,
-          lastSeen: now,
-        },
-        $setOnInsert: {
-          id,
-          identity: {
-            mood: data?.identity?.mood || "🌱",
-            accountId: data?.identity?.accountId || id,
+        const update = {
+          $set: {
+            x: data.x,
+            y: data.y,
+            growth: data.growth,
+            activeTime: data.activeTime,
+            lastSeen: now,
           },
-        },
-      };
+          $setOnInsert: {
+            id,
+            "identity.accountId": data?.identity?.accountId || id,
+            "identity.mood": data?.identity?.mood || "🌱",
+          },
+        };
 
-      // Save or update user info in the database
-      const updated = await User.findOneAndUpdate({ id }, update, {
-        upsert: true,
-        new: true,
-      });
+        const updated = await User.findOneAndUpdate({ id }, update, {
+          upsert: true,
+          new: true,
+        });
 
-      // Update bloom count if this user just reached full bloom
-      if (updated.growth === "🌻" && !fullBloomIDs.has(id)) {
-        fullBloomIDs.add(id);
-        fullBloomCount++;
-        io.emit("plant count", fullBloomCount);
+        if (updated.growth === "🌻" && !fullBloomIDs.has(id)) {
+          fullBloomIDs.add(id);
+          fullBloomCount++;
+          io.emit("plant count", fullBloomCount);
+        }
+
+        socket.broadcast.emit("cursor update", { id, ...data, lastSeen: now });
+      } catch (err) {
+        console.error("❌ cursor update error:", err);
       }
-
-      // Broadcast update to other clients
-      socket.broadcast.emit("cursor update", { id, ...data });
     });
 
     // Handle whisper messages between users
