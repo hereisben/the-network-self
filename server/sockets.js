@@ -45,12 +45,10 @@ module.exports = function (io) {
               activeTime: 0,
               growth: getGrowthStage(0).emoji,
               "identity.accountId": accountId || userId,
-              "identity.mood": mood || "🌱",
             },
             $set: {
               lastSeen: now,
-              ...(mood ? { "identity.mood": mood } : {}),
-              ...(accountId ? { "identity.accountId": accountId } : {}),
+              "identity.mood": mood || "🌱",
             },
           },
           { upsert: true, new: true },
@@ -89,8 +87,9 @@ module.exports = function (io) {
           },
           $setOnInsert: {
             id,
-            "identity.accountId": data?.identity?.accountId || id,
-            "identity.mood": data?.identity?.mood || "🌱",
+            activeTime: data.activeTime ?? 0,
+            growth: data.growth ?? getGrowthStage(0).emoji,
+            "identity.mood": "🌱",
           },
         };
 
