@@ -87,8 +87,6 @@ module.exports = function (io) {
           },
           $setOnInsert: {
             id,
-            activeTime: data.activeTime ?? 0,
-            growth: data.growth ?? getGrowthStage(0).emoji,
             "identity.mood": "🌱",
           },
         };
