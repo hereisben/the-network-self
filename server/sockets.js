@@ -44,7 +44,6 @@ module.exports = function (io) {
               y: 200,
               activeTime: 0,
               growth: getGrowthStage(0).emoji,
-              lastSeen: now,
               "identity.accountId": accountId || userId,
               "identity.mood": mood || "🌱",
             },
