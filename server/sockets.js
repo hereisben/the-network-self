@@ -83,12 +83,28 @@ module.exports = function (io) {
       const id = data.id || socket.id;
       data.lastSeen = Date.now();
 
+      const update = {
+        $set: {
+          x: data.x,
+          y: data.y,
+          growth: data.growth,
+          activeTime: data.activeTime,
+          lastSeen: now,
+        },
+        $setOnInsert: {
+          id,
+          identity: {
+            mood: data?.identity?.mood || "🌱",
+            accountId: data?.identity?.accountId || id,
+          },
+        },
+      };
+
       // Save or update user info in the database
-      const updated = await User.findOneAndUpdate(
-        { id },
-        { ...data, lastSeen: Date.now() },
-        { upsert: true, new: true },
-      );
+      const updated = await User.findOneAndUpdate({ id }, update, {
+        upsert: true,
+        new: true,
+      });
 
       // Update bloom count if this user just reached full bloom
       if (updated.growth === "🌻" && !fullBloomIDs.has(id)) {
