@@ -1,7 +1,12 @@
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  id: String,
+  id: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true,
+  },
   x: Number,
   y: Number,
   growth: String,

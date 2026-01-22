@@ -32,15 +32,27 @@ module.exports = function (io) {
 
       // If not found, create a new one
       if (!user) {
-        user = new User({
-          id: userId,
-          x: 100,
-          y: 200,
-          growth: getGrowthStage(0).emoji,
-          activeTime: 0,
-          lastSeen: Date.now(),
-          identity: { mood: mood || "🌱", accountId: accountId || userId },
-        });
+        const user = await User.findOneAndUpdate(
+          { id: userId },
+          {
+            $setOnInsert: {
+              id: userId,
+              x: 100,
+              y: 200,
+              activeTime: 0,
+              growth: getGrowthStage(0).emoji,
+              identity: { accountId: accountId || userId },
+            },
+            $set: {
+              lastSeen: Date.now(),
+              ...(mood && { "identity.mood": mood }),
+            },
+          },
+          {
+            upsert: true,
+            new: true,
+          },
+        );
       } else if (mood) {
         // Update mood if provided
         user.identity.mood = mood;
