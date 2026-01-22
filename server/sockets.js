@@ -23,7 +23,7 @@ module.exports = function (io) {
     });
 
     // Handle session initialization request
-    socket.on("request session", async ({ userId, mood }) => {
+    socket.on("request session", async ({ userId, mood, accountId }) => {
       // Link userId to socket.id
       userIdToSocketId[userId] = socket.id;
 
@@ -39,7 +39,7 @@ module.exports = function (io) {
           growth: getGrowthStage(0).emoji,
           activeTime: 0,
           lastSeen: Date.now(),
-          identity: { mood: mood || "🌱", accountId: userId },
+          identity: { mood: mood || "🌱", accountId: accountId || userId },
         });
       } else if (mood) {
         // Update mood if provided
@@ -75,7 +75,7 @@ module.exports = function (io) {
       const updated = await User.findOneAndUpdate(
         { id },
         { ...data, lastSeen: Date.now() },
-        { upsert: true, new: true }
+        { upsert: true, new: true },
       );
 
       // Update bloom count if this user just reached full bloom
@@ -160,7 +160,7 @@ module.exports = function (io) {
 // Helper to find a userId by socketId
 function getUserIdBySocket(socketId) {
   return Object.entries(userIdToSocketId).find(
-    ([, sid]) => sid === socketId
+    ([, sid]) => sid === socketId,
   )?.[0];
 }
 

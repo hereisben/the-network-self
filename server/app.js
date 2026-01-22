@@ -8,8 +8,7 @@ const mongoose = require("mongoose");
 mongoose
   .connect(process.env.MONGO_URI, {
     dbName: "plantNetwork", // Name of the database to use
-    useNewUrlParser: true, // Use new MongoDB URL parser
-    useUnifiedTopology: true, // Use new server discovery and monitoring engine
+    serverSelectionTimeoutMS: 10000,
   })
   .then(() => console.log("✅ Connected to MongoDB Atlas")) // Success message
   .catch((err) => console.error("❌ MongoDB connection error:", err)); // Error message
