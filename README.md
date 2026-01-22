@@ -38,4 +38,19 @@ This project explores how identity, mood, and presence can exist and persist in 
 
 ---
 
-## 📂 Project Structure
+## 🔄 Data Flow Overview
+
+- `localStorage` stores a persistent `accountId`
+- Client connects via Socket.IO
+- Server syncs user state with MongoDB
+- Growth, mood, and activity persist across sessions
+
+---
+
+## 📌 Notes
+
+`MongoDB` is the source of truth for user data
+
+`localStorage` is only used for session identification
+
+Designed as an exploratory net art experience rather than a traditional app
